@@ -1,200 +1,170 @@
-// app/coach/attendance/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRequireRole } from "@/lib/useRequireRole";
 
-type AttendanceStatus = "present" | "late" | "absent" | "injured";
+const supabase = createClient();
 
 type CoachAttendanceRow = {
   id: string;
   date: string;
-  status: AttendanceStatus;
+  status: string;
   note: string | null;
   created_at: string;
   athlete_id: string;
-  profiles?: {
+  profiles: {
     first_name: string | null;
     last_name: string | null;
     event_group: string | null;
   } | null;
 };
 
-function todayISO() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function pillClass(status: AttendanceStatus) {
-  const base =
-    "inline-flex items-center rounded-full px-3 py-1 text-xs font-bold border";
-  switch (status) {
-    case "present":
-      return `${base} border-emerald-200 bg-emerald-50 text-emerald-800`;
-    case "late":
-      return `${base} border-amber-200 bg-amber-50 text-amber-800`;
-    case "absent":
-      return `${base} border-red-200 bg-red-50 text-red-700`;
-    case "injured":
-    default:
-      return `${base} border-slate-200 bg-slate-50 text-slate-800`;
-  }
-}
-
-function displayName(r: CoachAttendanceRow) {
-  const first = r.profiles?.first_name ?? "";
-  const last = r.profiles?.last_name ?? "";
-  const full = `${first} ${last}`.trim();
-  return full.length ? full : `Athlete (${r.athlete_id.slice(0, 6)}…)`;
-}
-
 export default function CoachAttendancePage() {
-  const router = useRouter();
-  const { ready } = useRequireRole("coach");
-
-  const supabase = useMemo(() => createClient(), []);
-
-  const [loading, setLoading] = useState(true);
-  const [date, setDate] = useState(todayISO());
   const [rows, setRows] = useState<CoachAttendanceRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  async function load(selectedDate: string) {
-    setLoading(true);
-    setError(null);
+  useEffect(() => {
+    const fetchAttendance = async () => {
+      setLoading(true);
+      setError(null);
 
-    const { data, error } = await supabase
-      .from("attendance")
-      .select(
-        `
+      const { data, error } = await supabase
+        .from("attendance")
+        .select(
+          `
           id,
           date,
           status,
           note,
           created_at,
           athlete_id,
-          profiles:athlete_id (
+          profiles (
             first_name,
             last_name,
             event_group
           )
         `
-      )
-      .eq("date", selectedDate)
-      .order("created_at", { ascending: false });
+        )
+        .order("date", { ascending: false });
 
-    if (error) {
-      setError(error.message);
-      setRows([]);
-    } else {
-      setRows(Array.isArray(data) ? (data as CoachAttendanceRow[]) : []);
-    }
+      if (error) {
+        console.error(error);
+        setError("Failed to load attendance");
+        setRows([]);
+        setLoading(false);
+        return;
+      }
 
-    setLoading(false);
-  }
+      const incoming = Array.isArray(data) ? data : [];
 
-  useEffect(() => {
-    if (ready) load(date);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready]);
+      const normalized: CoachAttendanceRow[] = incoming.map((r: any) => {
+        const profile = Array.isArray(r.profiles)
+          ? r.profiles[0]
+          : r.profiles;
 
-  if (!ready) {
-    return (
-      <main className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
-        <p className="font-semibold text-slate-900">Loading…</p>
-      </main>
-    );
-  }
+        return {
+          id: r.id,
+          date: r.date,
+          status: r.status,
+          note: r.note ?? null,
+          created_at: r.created_at,
+          athlete_id: r.athlete_id,
+          profiles: profile
+            ? {
+                first_name: profile.first_name ?? null,
+                last_name: profile.last_name ?? null,
+                event_group: profile.event_group ?? null,
+              }
+            : null,
+        };
+      });
+
+      setRows(normalized);
+      setLoading(false);
+    };
+
+    fetchAttendance();
+  }, []);
 
   return (
-    <main className="min-h-screen bg-slate-100 p-6">
-      <div className="mx-auto max-w-5xl space-y-6">
-        {/* Header */}
-        <header className="rounded-2xl bg-white shadow-sm border border-[#C0C0C0] overflow-hidden">
-          <div className="px-6 py-5 bg-[#7A0019]">
-            <h1 className="text-3xl font-extrabold text-white">Attendance</h1>
-            <p className="text-sm text-white/80 mt-1">Date: {date}</p>
-          </div>
-
-          <div className="px-6 py-4 flex flex-wrap items-center justify-between gap-3">
-            <button
-              onClick={() => router.push("/coach")}
-              className="rounded-lg border border-[#C0C0C0] bg-white px-4 py-2 font-semibold text-slate-900 hover:bg-slate-50"
-            >
-              Back to Coach Portal
-            </button>
-
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-semibold text-slate-900">Date</label>
-              <input
-                className="rounded-lg border border-[#C0C0C0] p-2.5 focus:outline-none focus:ring-2 focus:ring-[#7A0019]/40"
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-              />
-              <button
-                onClick={() => load(date)}
-                className="rounded-lg bg-[#7A0019] px-4 py-2 font-semibold text-white hover:opacity-90"
-              >
-                Load
-              </button>
-            </div>
-          </div>
-        </header>
-
-        {/* Error */}
-        {error ? (
-          <div className="rounded-2xl bg-white shadow-sm border border-red-200 p-6 text-red-700">
-            {error}
-          </div>
-        ) : null}
-
-        {/* Body */}
-        {loading ? (
-          <div className="rounded-2xl bg-white shadow-sm border border-[#C0C0C0] p-6">
-            <p className="text-slate-700">Loading attendance…</p>
-          </div>
-        ) : rows.length === 0 ? (
-          <div className="rounded-2xl bg-white shadow-sm border border-[#C0C0C0] p-6">
-            <p className="text-slate-700">No check-ins for this date yet.</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {rows.map((r) => (
-              <article
-                key={r.id}
-                className="rounded-2xl bg-white shadow-sm border border-[#C0C0C0] p-6"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-bold text-slate-900">
-                      {displayName(r)}
-                    </h2>
-                    <p className="text-sm text-slate-600">
-                      Event: {r.profiles?.event_group ?? "—"}
-                    </p>
-                  </div>
-
-                  <span className={pillClass(r.status)}>
-                    {r.status.toUpperCase()}
-                  </span>
-                </div>
-
-                {r.note ? (
-                  <p className="mt-3 text-slate-700 whitespace-pre-wrap">
-                    <span className="font-semibold">Note:</span> {r.note}
-                  </p>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        )}
+    <main className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">Attendance</h1>
+        <p className="text-sm text-slate-600">
+          View athlete attendance by date.
+        </p>
       </div>
+
+      {loading && (
+        <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+          Loading attendance…
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && rows.length === 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+          No attendance records found.
+        </div>
+      )}
+
+      {!loading && !error && rows.length > 0 && (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                  Athlete
+                </th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                  Event Group
+                </th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                  Date
+                </th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                  Status
+                </th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                  Note
+                </th>
+              </tr>
+            </thead>
+
+            <tbody className="divide-y divide-slate-200">
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <td className="px-4 py-3">
+                    {row.profiles
+                      ? `${row.profiles.first_name ?? ""} ${
+                          row.profiles.last_name ?? ""
+                        }`
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-3">
+                    {row.profiles?.event_group ?? "—"}
+                  </td>
+                  <td className="px-4 py-3">
+                    {new Date(row.date).toLocaleDateString()}
+                  </td>
+                  <td className="px-4 py-3 font-semibold">
+                    {row.status}
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">
+                    {row.note ?? "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </main>
   );
 }
